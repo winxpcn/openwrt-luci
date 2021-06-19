@@ -116,7 +116,8 @@ if m:formvalue("cbid.network.%s._switch" % net:name()) then
 			   k ~= "type" and
 			   k ~= "ifname" and
 			   k ~= "_orig_ifname" and
-			   k ~= "_orig_bridge"
+			   k ~= "_orig_bridge" and
+			   k ~= "device"
 			then
 				m:del(net:name(), k)
 			end
@@ -213,6 +214,21 @@ for _, pr in ipairs(nw:get_protocols()) do
 	end
 end
 
+if nw.netifd_version > "2021-05-20" then
+	device = s:taboption("general", Value, "device", "<a style='color:red'>" .. translate("Device") .. "</a>")
+	m.uci:foreach("network", "device", function(e)
+		device:value(e.name)
+	end)
+	for _, iface in ipairs(nw:get_interfaces()) do
+		device:value(iface:name(), iface:get_i18n())
+	end
+	device:depends("proto", "static")
+	device:depends("proto", "dhcp")
+	device:depends("proto", "none")
+	device:depends("proto", "dhcpv6")
+	device:depends("proto", "pppoe")
+end
+
 
 auto = s:taboption("advanced", Flag, "auto", translate("Bring up on boot"))
 auto.default = (net:proto() == "none") and auto.disabled or auto.enabled
@@ -226,7 +242,7 @@ force_link = s:taboption("advanced", Flag, "force_link",
 
 force_link.default = (net:proto() == "static") and force_link.enabled or force_link.disabled
 
-
+if nw.netifd_version < "2021-05-20" then
 if not net:is_virtual() then
 	br = s:taboption("physical", Flag, "type", translate("Bridge interfaces"), translate("creates a bridge over specified interface(s)"))
 	br.enabled = "bridge"
@@ -339,6 +355,7 @@ if not net:is_virtual() then
 	ifname_multi.cfgvalue = ifname_single.cfgvalue
 	ifname_multi.write = ifname_single.write
 end
+end
 
 
 if has_firewall then
@@ -381,9 +398,14 @@ function p.remove() end
 function p.validate(self, value, section)
 	if value == net:proto() then
 		if not net:is_floating() and net:is_empty() then
-			local ifn = ((br and (br:formvalue(section) == "bridge"))
+			local ifn
+			if nw.netifd_version < "2021-05-20" then
+			ifn = ((br and (br:formvalue(section) == "bridge"))
 				and ifname_multi:formvalue(section)
 			     or ifname_single:formvalue(section))
+			else
+				ifn = device:formvalue(section)
+			end
 
 			for ifn in ut.imatch(ifn) do
 				return value
@@ -410,7 +432,7 @@ end
 
 local _, field
 for _, field in ipairs(s.children) do
-	if field ~= st and field ~= p and field ~= p_install and field ~= p_switch then
+	if field ~= st and field ~= p and field ~= p_install and field ~= p_switch and (nw.netifd_version > "2021-05-20" and field ~= device) then
 		if next(field.deps) then
 			local _, dep
 			for _, dep in ipairs(field.deps) do
